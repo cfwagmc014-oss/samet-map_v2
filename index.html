@@ -548,10 +548,12 @@ function renderAll(){ fillSelect($('#fZone'),[...new Set(state.prospects.map(p=>
   const sfl=state.lists.SF||DEFAULT_LISTS.SF; fillSelect($('#sfSel'),sfl,'— SF —'); const savedSf=localStorage.getItem(LS.sf); if(savedSf&&sfl.includes(savedSf)) $('#sfSel').value=savedSf;
   renderMarkers(); renderList(); if($('#vDash').classList.contains('active')) renderDash(); setQueue(getQueue()); }
 
-document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('.popbtn'); if(b&&b.dataset.id){ e.preventDefault(); map.closePopup&&map.closePopup(); openDetail(b.dataset.id); } });
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('.popbtn'); if(b&&b.dataset.id){ e.preventDefault(); e.stopPropagation(); const id=b.dataset.id; map.closePopup&&map.closePopup(); setTimeout(()=>openDetail(id),50); } });
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>switchView(b.dataset.v));
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeSheet(b.dataset.close));
-document.querySelectorAll('.sheet').forEach(s=>s.addEventListener('click',e=>{ if(e.target===s) s.classList.remove('open'); }));
+document.querySelectorAll('.sheet').forEach(s=>s.addEventListener('click',e=>{ if(e.target===s && Date.now()-(s._openedAt||0)>600) s.classList.remove('open'); }));
+// stamp open time so a ghost click right after opening cannot close the sheet
+new MutationObserver(ms=>ms.forEach(m=>{ const s=m.target; if(s.classList.contains('open')&&!s._wasOpen){ s._openedAt=Date.now(); } s._wasOpen=s.classList.contains('open'); })).observe(document.body,{attributes:true,attributeFilter:['class'],subtree:true});
 $('#dClose').onclick=()=>closeSheet('shDetail'); $('#dSave').onclick=saveVisit; $('#dHistBtn').onclick=()=>$('#dHist').scrollIntoView({behavior:'smooth'});
 ['fSearch','fZone','fType','fPri','fStatus','fMember'].forEach(i=>$('#'+i).addEventListener('input',()=>{ renderMarkers(); renderList(); }));
 $('#lSort').onchange=renderList; $('#btnExport').onclick=exportCSV;
