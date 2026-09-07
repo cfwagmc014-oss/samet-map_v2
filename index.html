@@ -296,7 +296,13 @@ async function flushQueue(){
 function upsertProspect(p){ const i=state.prospects.findIndex(x=>x.id===p.id); if(i>=0) state.prospects[i]={...state.prospects[i],...p}; else state.prospects.push(p); }
 function distKm(a,b){ if(!a||!b) return null; const R=6371,dLat=(b.lat-a.lat)*Math.PI/180,dLng=(b.lng-a.lng)*Math.PI/180; const x=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2; return 2*R*Math.asin(Math.sqrt(x)); }
 function fmtDist(d){ return d==null?'':(d<1?Math.round(d*1000)+' ม.':d.toFixed(1)+' กม.'); }
-function getPos(opts={}){ return new Promise((res,rej)=>{ if(!navigator.geolocation) return rej(new Error('อุปกรณ์ไม่รองรับ GPS')); navigator.geolocation.getCurrentPosition(p=>res({lat:+p.coords.latitude.toFixed(6),lng:+p.coords.longitude.toFixed(6),acc:Math.round(p.coords.accuracy)}),e=>rej(e),{enableHighAccuracy:true,timeout:12000,maximumAge:5000,...opts}); }); }
+function geoErrMsg(e){ if(!e) return 'หาตำแหน่งไม่ได้'; if(e.code===1) return 'เบราว์เซอร์ไม่ได้รับสิทธิ์ใช้ตำแหน่ง — กด 🔒 ข้าง URL → ตำแหน่ง → อนุญาต (iPhone: ตั้งค่า > Safari > ตำแหน่ง)'; if(e.code===2) return 'หาสัญญาณ GPS ไม่ได้ — เช็กว่าเปิด Location/GPS ของเครื่องแล้ว และออกมากลางแจ้ง'; if(e.code===3) return 'GPS ตอบช้าเกินไป — ลองใหม่กลางแจ้ง'; return e.message||'หาตำแหน่งไม่ได้'; }
+function inAppBrowser(){ return /Line\/|FBAN|FBAV|Instagram|MicroMessenger/i.test(navigator.userAgent); }
+function getPos(opts={}){ return new Promise((res,rej)=>{
+  if(!window.isSecureContext) return rej(new Error('ต้องเปิดผ่าน https (ลิงก์ github.io) ถึงจะใช้ GPS ได้'));
+  if(!navigator.geolocation) return rej(new Error('อุปกรณ์/เบราว์เซอร์นี้ไม่รองรับ GPS'));
+  if(inAppBrowser()) toast('กำลังเปิดจากในแอป (LINE/Facebook) ถ้า GPS ไม่ทำงาน ให้กด ⋯ → เปิดในเบราว์เซอร์',4000);
+  navigator.geolocation.getCurrentPosition(p=>res({lat:+p.coords.latitude.toFixed(6),lng:+p.coords.longitude.toFixed(6),acc:Math.round(p.coords.accuracy)}),e=>rej(e),{enableHighAccuracy:true,timeout:15000,maximumAge:5000,...opts}); }); }
 function isDue(p){ return p.nextDate && p.nextDate<=today() && !['Active','ไม่สนใจ','ปิดกิจการ'].includes(p.visitResult); }
 function filtered(){
   const q=($('#fSearch').value||'').toLowerCase(), z=$('#fZone').value, t=$('#fType').value, pr=$('#fPri').value, st=$('#fStatus').value, mb=$('#fMember').value;
@@ -322,19 +328,19 @@ function renderMarkers(){
   state.prospects.forEach(p=>{
     if(!p.lat||!p.lng) return;
     let m=markers[p.id];
-    if(!m){ m=L.marker([p.lat,p.lng],{icon:pinIcon(p),draggable:true}); m.on('add',()=>{ if(m.dragging){ dragMode?m.dragging.enable():m.dragging.disable(); } }); m.on('dragend',()=>onPinDragged(p.id,m)); m.bindTooltip(esc(shortName(p.name)),{permanent:true,direction:'right',offset:[10,-14],className:'namelbl '+(p.priority==='A'?'a':''),opacity:1}); m.bindPopup(()=>popupHtml(p)); m.on('popupopen',()=>{ const b=document.querySelector('.popbtn'); if(b) b.onclick=()=>openDetail(p.id); }); markers[p.id]=m; }
+    if(!m){ m=L.marker([p.lat,p.lng],{icon:pinIcon(p),draggable:true}); m.on('add',()=>{ if(m.dragging){ dragMode?m.dragging.enable():m.dragging.disable(); } }); m.on('dragend',()=>onPinDragged(p.id,m)); m.bindTooltip(esc(shortName(p.name)),{permanent:true,direction:'right',offset:[10,-14],className:'namelbl '+(p.priority==='A'?'a':''),opacity:1}); m.bindPopup(()=>popupHtml(p)); markers[p.id]=m; }
     else { m.setLatLng([p.lat,p.lng]); m.setIcon(pinIcon(p)); if(m.getTooltip()) m.setTooltipContent(esc(shortName(p.name))); }
     if(show.has(p.id)){ if(!map.hasLayer(m)) m.addTo(map); } else if(map.hasLayer(m)) map.removeLayer(m);
   });
 }
 function popupHtml(p){ const pp=state.prospects.find(x=>x.id===p.id)||p; const d=distKm(state.me,pp);
-  return `<b>${esc(pp.name)}</b><br><span class="chip" style="background:${PRI_COLOR[pp.priority]}">${esc(pp.priority)}</span><span class="chip" style="background:${STATUS_COLOR[pp.visitResult||'ยังไม่เข้า']}">${esc(pp.visitResult||'ยังไม่เข้า')}</span><br>${esc(pp.type)} · ${esc(pp.zone)}${d!=null?' · '+fmtDist(d):''}<br>${pp.locSource==='gps'?'📍 พิกัด GPS':pp.locSource==='map'?'📌 ปักบนแผนที่แล้ว':'⚠ ตำแหน่งประมาณตามโซน'}${isDue(pp)?'<br><span class="due">⏰ ถึงกำหนดติดตาม '+esc(pp.nextDate)+'</span>':''}<div style="display:flex;gap:6px;margin-top:6px"><a href="${gmapsUrl(pp)}" target="_blank" rel="noopener" style="flex:1;text-align:center;border:1px solid #E5E7EB;border-radius:6px;padding:4px;text-decoration:none;color:#1B2A4A;font-weight:600">📍 Google Maps</a><a href="https://www.google.com/maps/dir/?api=1&destination=${pp.lat},${pp.lng}" target="_blank" rel="noopener" style="flex:1;text-align:center;border:1px solid #E5E7EB;border-radius:6px;padding:4px;text-decoration:none;color:#1B2A4A;font-weight:600">🧭 นำทาง</a></div><button class="popbtn">เปิดข้อมูล / บันทึกการเยี่ยม</button>`; }
+  return `<b class="popbtn" data-id="${esc(pp.id)}" style="cursor:pointer;background:none;color:var(--blue);padding:0;text-align:left">${esc(pp.name)} ›</b><br><span class="chip" style="background:${PRI_COLOR[pp.priority]}">${esc(pp.priority)}</span><span class="chip" style="background:${STATUS_COLOR[pp.visitResult||'ยังไม่เข้า']}">${esc(pp.visitResult||'ยังไม่เข้า')}</span><br>${esc(pp.type)} · ${esc(pp.zone)}${d!=null?' · '+fmtDist(d):''}<br>${pp.locSource==='gps'?'📍 พิกัด GPS':pp.locSource==='map'?'📌 ปักบนแผนที่แล้ว':'⚠ ตำแหน่งประมาณตามโซน'}${isDue(pp)?'<br><span class="due">⏰ ถึงกำหนดติดตาม '+esc(pp.nextDate)+'</span>':''}<div style="display:flex;gap:6px;margin-top:6px"><a href="${gmapsUrl(pp)}" target="_blank" rel="noopener" style="flex:1;text-align:center;border:1px solid #E5E7EB;border-radius:6px;padding:4px;text-decoration:none;color:#1B2A4A;font-weight:600">📍 Google Maps</a><a href="https://www.google.com/maps/dir/?api=1&destination=${pp.lat},${pp.lng}" target="_blank" rel="noopener" style="flex:1;text-align:center;border:1px solid #E5E7EB;border-radius:6px;padding:4px;text-decoration:none;color:#1B2A4A;font-weight:600">🧭 นำทาง</a></div><button class="popbtn" data-id="${esc(pp.id)}">เปิดข้อมูล / บันทึกการเยี่ยม</button>`; }
 function renderLegend(){ $('#legend').innerHTML=Object.entries(STATUS_COLOR).slice(0,8).map(([k,c])=>`<span><i style="background:${c}"></i>${esc(k)}</span>`).join('')+`<span style="grid-column:1/-1;color:#6B7280">ขอบสี = Priority (แดง A / น้ำเงิน B / เทา C)</span>`; }
 async function locateMe(fly){
   try{ const pos=await getPos(); state.me=pos;
     if(!meMarker){ meMarker=L.circleMarker([pos.lat,pos.lng],{radius:8,color:'#fff',weight:2,fillColor:'#0168B5',fillOpacity:1}).addTo(map); meMarker.bindTooltip('คุณอยู่ที่นี่'); } else meMarker.setLatLng([pos.lat,pos.lng]);
     if(fly) map.flyTo([pos.lat,pos.lng],16); renderList(); return pos; }
-  catch(e){ if(fly) toast('หาตำแหน่งไม่ได้: เปิด Location Services แล้วลองใหม่'); }
+  catch(e){ if(fly) toast('✗ '+geoErrMsg(e),6000); }
 }
 
 function setDragMode(on){ dragMode=on; $('#btnDrag').classList.toggle('on',on); $('#btnZoneFix').style.display=on?'flex':'none'; if(!on) cancelZonePick(); Object.values(markers).forEach(m=>{ if(m.dragging){ on?m.dragging.enable():m.dragging.disable(); } }); toast(on?'โหมดย้ายหมุด: ลากหมุดไปวางตำแหน่งจริง แล้วยืนยัน':'ปิดโหมดย้ายหมุด'); }
@@ -396,7 +402,7 @@ function openDetail(id){
       <a href="${gmapsUrl(p)}" target="_blank" rel="noopener" title="${p.locSource==='gps'||p.locSource==='map'?'เปิดพิกัดใน Google Maps':'ค้นหาชื่อร้านใน Google Maps'}">📍 Google Maps</a>
       <button id="dCenter">🗺 แผนที่</button>
     </div>
-    <div class="gpsbox ${p.locSource==='gps'||p.locSource==='map'?'gps':''}" id="dGps"><span>📍</span><span class="s">${p.locSource==='gps'?'พิกัด GPS ยืนยันแล้ว':p.locSource==='map'?'ปักบนแผนที่แล้ว — กด GPS หน้างานเพื่อยืนยันอีกครั้งได้':'ตำแหน่งประมาณตามโซน — กดปักหมุดเมื่ออยู่หน้าร้าน'}<br><span class="mono">${p.lat}, ${p.lng}</span></span><button class="btn blue sm" id="dPin">ปักหมุดตรงนี้</button></div>
+    <div class="gpsbox ${p.locSource==='gps'||p.locSource==='map'?'gps':''}" id="dGps"><span>📍</span><span class="s">${p.locSource==='gps'?'พิกัด GPS ยืนยันแล้ว':p.locSource==='map'?'ปักบนแผนที่แล้ว — กด GPS หน้างานเพื่อยืนยันอีกครั้งได้':'ตำแหน่งประมาณตามโซน — กดปักหมุดเมื่ออยู่หน้าร้าน'}<br><span class="mono">${p.lat}, ${p.lng}</span></span><button class="btn blue sm" id="dPin">📍 เช็คอิน / ปักหมุดตรงนี้</button></div>
 
     <div class="sec">ผลการเยี่ยมครั้งนี้</div>
     <div class="row2">
@@ -440,12 +446,12 @@ function openDetail(id){
   $('#shDetail').classList.add('open'); $('#dBody').scrollTop=0;
 }
 async function pinHere(){
-  const b=$('#dPin'); b.disabled=true; b.textContent='กำลังหา GPS…';
+  const b=$('#dPin'); b.disabled=true; b.textContent='กำลังหา GPS…'; toast('กำลังขอตำแหน่งจากเครื่อง… ถ้ามีหน้าต่างถามสิทธิ์ ให้กด อนุญาต',3000);
   try{ const pos=await getPos(); state.gpsFix=pos; state.me=pos;
     const box=$('#dGps'); box.classList.add('gps'); box.querySelector('.s').innerHTML=`ได้พิกัด GPS (±${pos.acc} ม.) — จะบันทึกพร้อมการเยี่ยม<br><span class="mono">${pos.lat}, ${pos.lng}</span>`;
     if(pos.acc>60) toast('ความแม่นยำ GPS ต่ำ (±'+pos.acc+' ม.) ลองยืนกลางแจ้งแล้วกดใหม่',3000);
-    b.textContent='ปักใหม่'; }
-  catch(e){ toast('หาตำแหน่งไม่ได้ — ตรวจสอบ Location permission'); b.textContent='ปักหมุดตรงนี้'; }
+    b.textContent='📍 ปักใหม่'; }
+  catch(e){ toast('✗ '+geoErrMsg(e),6000); b.textContent='ปักหมุดตรงนี้'; }
   b.disabled=false;
 }
 function compressImage(file,max=1280,q=.78){ return new Promise(res=>{ const img=new Image(); const u=URL.createObjectURL(file); img.onload=()=>{ const r=Math.min(1,max/Math.max(img.width,img.height)); const c=document.createElement('canvas'); c.width=Math.round(img.width*r); c.height=Math.round(img.height*r); c.getContext('2d').drawImage(img,0,0,c.width,c.height); URL.revokeObjectURL(u); res(c.toDataURL('image/jpeg',q)); }; img.src=u; }); }
@@ -479,7 +485,7 @@ async function saveVisit(){
 
 // ---------- add prospect ----------
 function openAdd(){ state.addFix=null; $('#aGps').classList.remove('gps'); $('#aGps .s').textContent='ยังไม่ได้พิกัด (จะใช้กึ่งกลางโซนที่เลือก)'; fillSelect($('#aType'),state.lists['Business Type']); fillSelect($('#aZone'),Object.keys(ZONES)); ['aName','aPhone','aNotes'].forEach(i=>$('#'+i).value=''); $('#shAdd').classList.add('open'); }
-$('#aGpsBtn').onclick=async()=>{ try{ const pos=await getPos(); state.addFix=pos; $('#aGps').classList.add('gps'); $('#aGps .s').textContent=`ได้พิกัด GPS ±${pos.acc} ม. (${pos.lat}, ${pos.lng})`; }catch(e){ toast('หาตำแหน่งไม่ได้'); } };
+$('#aGpsBtn').onclick=async()=>{ toast('กำลังขอตำแหน่ง…'); try{ const pos=await getPos(); state.addFix=pos; $('#aGps').classList.add('gps'); $('#aGps .s').textContent=`ได้พิกัด GPS ±${pos.acc} ม. (${pos.lat}, ${pos.lng})`; }catch(e){ toast('✗ '+geoErrMsg(e),6000); } };
 $('#aSave').onclick=async()=>{
   const name=$('#aName').value.trim(); if(!name){ toast('กรอกชื่อร้าน'); return; }
   const zone=$('#aZone').value, zc=ZONES[zone]||[12.55,101.455];
@@ -542,6 +548,7 @@ function renderAll(){ fillSelect($('#fZone'),[...new Set(state.prospects.map(p=>
   const sfl=state.lists.SF||DEFAULT_LISTS.SF; fillSelect($('#sfSel'),sfl,'— SF —'); const savedSf=localStorage.getItem(LS.sf); if(savedSf&&sfl.includes(savedSf)) $('#sfSel').value=savedSf;
   renderMarkers(); renderList(); if($('#vDash').classList.contains('active')) renderDash(); setQueue(getQueue()); }
 
+document.addEventListener('click',e=>{ const b=e.target.closest&&e.target.closest('.popbtn'); if(b&&b.dataset.id){ e.preventDefault(); map.closePopup&&map.closePopup(); openDetail(b.dataset.id); } });
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>switchView(b.dataset.v));
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeSheet(b.dataset.close));
 document.querySelectorAll('.sheet').forEach(s=>s.addEventListener('click',e=>{ if(e.target===s) s.classList.remove('open'); }));
