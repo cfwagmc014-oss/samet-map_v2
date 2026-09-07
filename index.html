@@ -259,7 +259,7 @@ async function loadData(force){
     const r = await fetch(url+'?action=all&_='+Date.now());
     const j = await r.json();
     if(!j.ok) throw new Error(j.error);
-    state.prospects=j.prospects; state.visits=j.visits; state.lists={...DEFAULT_LISTS,...j.lists};
+    const dup=j.prospects.length; state.prospects=dedupeProspects(j.prospects); state.visits=j.visits; state.lists={...DEFAULT_LISTS,...j.lists}; if(dup>state.prospects.length) toast(`พบข้อมูลซ้ำใน Sheet ${dup-state.prospects.length} แถว (แสดงเฉพาะแถวล่าสุด) — รัน dedupeProspects ใน Apps Script เพื่อล้าง`,6000);
     localStorage.setItem(LS.data, JSON.stringify({prospects:j.prospects,visits:j.visits,lists:j.lists,time:j.time}));
     setSync('ok','Online');
   }catch(e){
@@ -293,6 +293,7 @@ async function flushQueue(){
 }
 
 // ---------- helpers ----------
+function dedupeProspects(list){ const m=new Map(); list.forEach(p=>{ if(!p||!p.id) return; const id=String(p.id).trim(); p.id=id; const prev=m.get(id); if(!prev){ m.set(id,p); return; } const score=x=>[String(x.updatedAt||'').padEnd(19,' '), String(x.lastVisit||'').padEnd(19,' '), (x.locSource==='gps'||x.locSource==='map')?'1':'0'].join(''); if(score(p)>=score(prev)) m.set(id,p); }); return [...m.values()]; }
 function upsertProspect(p){ const i=state.prospects.findIndex(x=>x.id===p.id); if(i>=0) state.prospects[i]={...state.prospects[i],...p}; else state.prospects.push(p); }
 function distKm(a,b){ if(!a||!b) return null; const R=6371,dLat=(b.lat-a.lat)*Math.PI/180,dLng=(b.lng-a.lng)*Math.PI/180; const x=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2; return 2*R*Math.asin(Math.sqrt(x)); }
 function fmtDist(d){ return d==null?'':(d<1?Math.round(d*1000)+' ม.':d.toFixed(1)+' กม.'); }
